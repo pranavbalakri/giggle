@@ -4,15 +4,15 @@ import { Analytics } from '@vercel/analytics/next'
 import { Web3AuthAppProvider } from './web3auth-provider'
 import './globals.css'
 
-const fraunces = Fraunces({ 
-  subsets: ["latin"],
-  variable: "--font-serif"
-});
+const fraunces = Fraunces({
+  subsets: ['latin'],
+  variable: '--font-serif',
+})
 
-const inter = Inter({ 
-  subsets: ["latin"],
-  variable: "--font-sans"
-});
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+})
 
 export const metadata: Metadata = {
   title: 'Giggle | Freelance Marketplace',
