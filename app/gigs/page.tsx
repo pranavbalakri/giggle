@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic"
 
 import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Header } from "@/components/header"
 import { RoleCard } from "@/components/role-card"
 import { Button } from "@/components/ui/button"
@@ -28,8 +28,11 @@ interface Gig {
   freelancer: { id: string; name: string }
 }
 
-export default function GigsPage() {
+import { Suspense } from "react"
+
+function GigsContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [gigs, setGigs] = useState<Gig[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,7 +43,7 @@ export default function GigsPage() {
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [minBudget, setMinBudget] = useState("")
   const [maxBudget, setMaxBudget] = useState("")
-  const [skill, setSkill] = useState("")
+  const [skill, setSkill] = useState(() => searchParams.get("q") ?? "")
   const [sort, setSort] = useState("newest")
 
   const fetchGigs = useCallback(async () => {
@@ -229,5 +232,13 @@ export default function GigsPage() {
         </div>
       </div>
     </main>
+  )
+}
+
+export default function GigsPage() {
+  return (
+    <Suspense>
+      <GigsContent />
+    </Suspense>
   )
 }

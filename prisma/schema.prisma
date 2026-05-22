@@ -7,61 +7,102 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      String   @default("freelancer")
-  createdAt DateTime @default(now())
-
-  gigs        Gig[]        @relation("FreelancerGigs")
-  requests    Request[]    @relation("ClientRequests")
-  submissions Submission[] @relation("FreelancerSubmissions")
-}
-
 model Gig {
-  id           String   @id @default(cuid())
-  freelancerId String
-  title        String
-  category     String
-  description  String
-  budget       Float
-  deadline     DateTime
-  skills       String   @default("[]")
-  deliverables String
-  status          String   @default("open")
-  contractAddress String?
-  createdAt       DateTime @default(now())
-
-  freelancer User         @relation("FreelancerGigs", fields: [freelancerId], references: [id])
-  requests   Request[]
-  submission Submission?
+  id                 String       @id @default(cuid())
+  freelancerId       String
+  title              String
+  category           String
+  description        String
+  budget             Float
+  deadline           DateTime
+  skills             String       @default("[]")
+  deliverables       String
+  status             String       @default("open")
+  contractAddress    String?
+  createdAt          DateTime     @default(now())
+  ethAmount          Float?
+  clientArgument     String?
+  freelancerArgument String?
+  mediatorReasoning  String?
+  mediatorVerdict    String?
+  aiReviewData       String?
+  paymentMode        String       @default("custodial")
+  clientWallet       String?
+  freelancer         User         @relation(fields: [freelancerId], references: [id])
+  requests           Request[]
+  submissions        Submission[]
 }
 
 model Request {
-  id               String   @id @default(cuid())
-  gigId            String
-  clientId         String
-  proposal         String
-  proposedTimeline String
-  status           String   @default("pending")
-  createdAt        DateTime @default(now())
-
-  gig    Gig  @relation(fields: [gigId], references: [id])
-  client User @relation("ClientRequests", fields: [clientId], references: [id])
+  id                   String   @id @default(cuid())
+  gigId                String
+  clientId             String
+  proposal             String
+  proposedTimeline     String
+  status               String   @default("pending")
+  createdAt            DateTime @default(now())
+  contractAddress      String?
+  ethAmount            Float?
+  paymentStatus        String?
+  paymentSessionId     String?  @unique
+  moonpayTransactionId String?
+  paymentTxHash        String?
+  expectedEthAmount    String?
+  receivedEthAmount    String?
+  slippagePercent      Float?
+  depositRetryCount    Int      @default(0)
+  paymentFailureReason String?
+  client               User     @relation(fields: [clientId], references: [id])
+  gig                  Gig      @relation(fields: [gigId], references: [id])
 }
 
 model Submission {
-  id           String   @id @default(cuid())
-  gigId        String   @unique
+  id           String           @id @default(cuid())
+  gigId        String
   freelancerId String
   textContent  String?
   url          String?
-  filePaths    String   @default("[]")
+  filePaths    String           @default("[]")
   notes        String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime         @default(now())
+  version      Int              @default(1)
+  freelancer   User             @relation(fields: [freelancerId], references: [id])
+  gig          Gig              @relation(fields: [gigId], references: [id])
+  files        SubmissionFile[]
+}
 
-  gig        Gig  @relation(fields: [gigId], references: [id])
-  freelancer User @relation("FreelancerSubmissions", fields: [freelancerId], references: [id])
+model SubmissionFile {
+  id           String     @id @default(cuid())
+  submissionId String?
+  gigId        String
+  filename     String
+  storagePath  String
+  mimeType     String
+  sizeBytes    Int
+  fileType     String     // "image" | "document" | "code" | "other"
+  createdAt    DateTime   @default(now())
+  submission   Submission? @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@index([gigId])
+}
+
+model User {
+  id                String       @id @default(cuid())
+  name              String
+  email             String       @unique
+  password          String
+  role              String       @default("freelancer")
+  walletAddress     String?
+  createdAt         DateTime     @default(now())
+  bio               String?
+  education         String       @default("[]")
+  industry          String?
+  professionalTitle String?
+  profilePicture    String?
+  skills            String       @default("[]")
+  workExperience    String       @default("[]")
+  gigs              Gig[]
+  requests          Request[]
+  submissions       Submission[]
 }

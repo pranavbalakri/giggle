@@ -3,13 +3,53 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: lockstep
-      POSTGRES_PASSWORD: lockstep
-      POSTGRES_DB: lockstep
+      POSTGRES_USER: giggle
+      POSTGRES_PASSWORD: giggle
+      POSTGRES_DB: giggle
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U giggle -d giggle"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      DATABASE_URL: postgresql://giggle:giggle@db:5432/giggle
+    command: sh -c "npm install && npx prisma migrate deploy && npx prisma db seed"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    command: anvil
+    environment:
+      ANVIL_IP_ADDR: "0.0.0.0"
+    ports:
+      - "8545:8545"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
   postgres_data:

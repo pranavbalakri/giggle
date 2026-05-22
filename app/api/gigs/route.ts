@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { getSessionFromRequest } from "@/lib/auth"
+import { usdToEth } from "@/lib/eth-price"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -11,9 +12,11 @@ export async function GET(req: NextRequest) {
   const minBudget = searchParams.get("minBudget")
   const maxBudget = searchParams.get("maxBudget")
   const skill = searchParams.get("skill")
+  const q = searchParams.get("q")
 
   const where: Record<string, unknown> = {}
   if (category && category !== "All") where.category = category
+  if (q) where.title = { contains: q, mode: "insensitive" }
 
   if (minBudget || maxBudget) {
     where.budget = {
@@ -73,6 +76,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "All fields required" }, { status: 400 })
     }
 
+    // Input validation for security
+    const MAX_TITLE_LENGTH = 200
+    const MAX_DESCRIPTION_LENGTH = 10000
+    const MAX_DELIVERABLES_LENGTH = 5000
+
+    if (title.length > MAX_TITLE_LENGTH) {
+      return NextResponse.json({ error: `Title must be ${MAX_TITLE_LENGTH} characters or less` }, { status: 400 })
+    }
+    if (description.length > MAX_DESCRIPTION_LENGTH) {
+      return NextResponse.json({ error: `Description must be ${MAX_DESCRIPTION_LENGTH} characters or less` }, { status: 400 })
+    }
+    if (deliverables.length > MAX_DELIVERABLES_LENGTH) {
+      return NextResponse.json({ error: `Deliverables must be ${MAX_DELIVERABLES_LENGTH} characters or less` }, { status: 400 })
+    }
+
+    const ethAmount = await usdToEth(parseFloat(budget))
+
     const gig = await prisma.gig.create({
       data: {
         freelancerId: session.id,
@@ -83,6 +103,7 @@ export async function POST(req: NextRequest) {
         deadline: new Date(deadline),
         skills: JSON.stringify(skills ?? []),
         deliverables,
+        ethAmount,
       },
     })
 

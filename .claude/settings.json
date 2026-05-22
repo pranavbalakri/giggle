@@ -19,7 +19,19 @@
       "Bash(PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=\"yes\" npx prisma migrate reset --force)",
       "Bash(grep -n \"client\\\\|freelancer\\\\|isClient\\\\|isFreelancer\" /Users/pranavbalakri/lockstep/app/gig/[id]/page.tsx)",
       "Bash(git checkout:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=yes npx prisma migrate reset --force)",
+      "Bash(git add:*)",
+      "Bash(forge --version)",
+      "Bash(npx solc:*)",
+      "Bash(ls *.abi *.bin)",
+      "Bash(ls /Users/pranavbalakri/lockstep/app/api/gigs/[id]/)",
+      "Bash(grep \"createPublicClient\" /Users/pranavbalakri/lockstep/app/gig/[id]/page.tsx)",
+      "Bash(diff /Users/pranavbalakri/lockstep/components/header.tsx:*)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(diff /Users/pranavbalakri/lockstep/components/hero-section.tsx:*)",
+      "Bash(diff /Users/pranavbalakri/lockstep/components/roles-section.tsx:*)"
     ],
     "additionalDirectories": [
       "/Users/pranavbalakri/lockstep/app/api/gigs/[id]",

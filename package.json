@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "db:seed": "npx tsx prisma/seed.ts",
-    "db:reset": "npx prisma migrate reset --force && npx tsx prisma/seed.ts"
+    "db:reset": "npx prisma migrate reset --force && npx tsx prisma/seed.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -48,6 +49,9 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/pg": "^8.18.0",
     "@vercel/analytics": "1.6.1",
+    "@web3auth/base": "^9.7.0",
+    "@web3auth/ethereum-provider": "^9.7.0",
+    "@web3auth/modal": "^10.15.0",
     "autoprefixer": "^10.4.20",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
@@ -63,7 +67,7 @@
     "next": "16.1.6",
     "next-themes": "^0.4.6",
     "pg": "^8.20.0",
-    "prisma": "^6.19.2",
+    "prisma": "^7.5.0",
     "react": "19.2.4",
     "react-day-picker": "9.13.2",
     "react-dom": "19.2.4",

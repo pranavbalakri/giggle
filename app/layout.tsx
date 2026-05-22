@@ -1,6 +1,18 @@
 import type { Metadata } from 'next'
+import { Fraunces, Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import { Web3AuthAppProvider } from './web3auth-provider'
 import './globals.css'
+
+const fraunces = Fraunces({
+  subsets: ['latin'],
+  variable: '--font-serif',
+})
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+})
 
 export const metadata: Metadata = {
   title: 'Giggle | Freelance Marketplace',
@@ -32,8 +44,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased">
-        {children}
+      <body className={`${fraunces.variable} ${inter.variable} font-sans antialiased`}>
+        <Web3AuthAppProvider>
+          {children}
+        </Web3AuthAppProvider>
         <Analytics />
       </body>
     </html>

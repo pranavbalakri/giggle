@@ -1,13 +1,16 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { formatDistanceToNow, format } from "date-fns"
+import { useWeb3Auth, useWeb3AuthConnect } from "@web3auth/modal/react"
+import { createWalletClient, custom, type EIP1193Provider } from "viem"
+import { sepolia } from "viem/chains"
 
-interface SessionUser { id: string; name: string; email: string; role: string }
+interface SessionUser { id: string; name: string; email: string; role: string; walletAddress?: string | null }
 interface Gig { id: string; title: string; budget: number; status: string; requestCount: number; createdAt: string; deadline: string }
 interface Request {
   id: string
@@ -16,7 +19,8 @@ interface Request {
   proposedTimeline: string
   status: string
   createdAt: string
-  gig: { id: string; title: string; budget: number; deadline: string; status?: string; freelancer?: { id: string; name: string } }
+  ethAmount?: number | null
+  gig: { id: string; title: string; budget: number; deadline: string; status?: string; ethAmount?: number | null; contractAddress?: string | null; freelancer?: { id: string; name: string } }
   client?: { id: string; name: string }
 }
 
@@ -36,6 +40,11 @@ export default function DashboardPage() {
   const [gigs, setGigs] = useState<Gig[]>([])
   const [requests, setRequests] = useState<Request[]>([])
   const [loading, setLoading] = useState(true)
+  const [actionError, setActionError] = useState("")
+  const [pendingAcceptId, setPendingAcceptId] = useState<string | null>(null)
+  const pendingProcessed = useRef(false)
+  const { provider, isConnected } = useWeb3Auth()
+  const { connect } = useWeb3AuthConnect()
   const router = useRouter()
 
   const loadData = useCallback(async (u: SessionUser) => {
@@ -67,13 +76,70 @@ export default function DashboardPage() {
       })
   }, [router, loadData])
 
-  async function handleRequestAction(requestId: string, action: "accept" | "reject") {
-    await fetch(`/api/requests/${requestId}`, {
+  // When Web3Auth connects (after accept triggers connect()), save the wallet address
+  // and process the pending accept.
+  useEffect(() => {
+    if (!isConnected || !provider || !pendingAcceptId || pendingProcessed.current) return
+    pendingProcessed.current = true
+    ;(async () => {
+      try {
+        const wc = createWalletClient({ chain: sepolia, transport: custom(provider as EIP1193Provider) })
+        const [addr] = await wc.getAddresses()
+        if (addr && !user?.walletAddress) {
+          const res = await fetch("/api/auth/me", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ walletAddress: addr }),
+          })
+          if (res.ok) setUser((u) => u ? { ...u, walletAddress: addr } : u)
+        }
+        const id = pendingAcceptId
+        setPendingAcceptId(null)
+        await doAccept(id)
+      } finally {
+        pendingProcessed.current = false
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, provider, pendingAcceptId])
+
+  async function doAccept(requestId: string) {
+    const res = await fetch(`/api/requests/${requestId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action: "accept" }),
     })
+    if (!res.ok) {
+      const data = await res.json()
+      setActionError(data.error ?? "Action failed")
+      return
+    }
     if (user) loadData(user)
+  }
+
+  async function handleRequestAction(requestId: string, action: "accept" | "reject") {
+    setActionError("")
+    if (action === "accept" && !user?.walletAddress) {
+      // Connect embedded wallet to capture address before accepting
+      setPendingAcceptId(requestId)
+      connect()
+      return
+    }
+    if (action === "reject") {
+      const res = await fetch(`/api/requests/${requestId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        setActionError(data.error ?? "Action failed")
+        return
+      }
+      if (user) loadData(user)
+      return
+    }
+    await doAccept(requestId)
   }
 
   if (loading) {
@@ -104,10 +170,120 @@ export default function DashboardPage() {
         {user.role === "client" ? (
           <ClientDashboard requests={requests} />
         ) : (
-          <FreelancerDashboard gigs={gigs} requests={requests} onRequestAction={handleRequestAction} />
+          <FreelancerDashboard gigs={gigs} requests={requests} onRequestAction={handleRequestAction} actionError={actionError} />
         )}
       </div>
     </main>
+  )
+}
+
+const STEPS = ["Request sent", "Accepted", "Under review", "Complete"]
+
+function getActiveStep(req: Request): number {
+  if (req.status === "pending") return 0
+  if (req.status === "rejected") return -1
+  const s = req.gig.status
+  if (s === "in_progress") return 1
+  if (s === "submitted") return 2
+  if (s === "completed" || s === "disputed") return 3
+  return 1
+}
+
+function RequestTracker({ req }: { req: Request }) {
+  const active = getActiveStep(req)
+  const isRejected = active === -1
+  const isDisputed = req.gig.status === "disputed"
+  const needsDeposit = active === 1 && !!req.gig.ethAmount && !req.ethAmount
+
+  const steps = isDisputed
+    ? ["Request sent", "Accepted", "Under review", "Disputed"]
+    : STEPS
+
+  return (
+    <div className={`rounded-xl border bg-card p-5 ${isRejected ? "opacity-50" : ""}`}>
+      {/* Header */}
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <Link href={`/gig/${req.gig.id}`} className="font-medium text-foreground hover:text-primary transition-colors">
+            {req.gig.title}
+          </Link>
+          {req.gig.freelancer && (
+            <span className="ml-2 text-xs text-muted-foreground">by {req.gig.freelancer.name}</span>
+          )}
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            ${req.gig.budget.toLocaleString()} · {req.proposedTimeline}
+            {req.gig.deadline ? ` · due ${format(new Date(req.gig.deadline), "MMM d")}` : ""}
+          </p>
+        </div>
+        <Button asChild size="sm" variant="ghost" className="shrink-0 rounded-full">
+          <Link href={`/gig/${req.gig.id}`}>View</Link>
+        </Button>
+      </div>
+
+      {isRejected ? (
+        <p className="text-sm text-destructive">Request was declined.</p>
+      ) : (
+        <>
+          {/* Step tracker */}
+          <div className="flex items-start">
+            {steps.map((label, i) => {
+              const done = i < active
+              const current = i === active
+              const last = i === steps.length - 1
+              const disputed = isDisputed && i === steps.length - 1
+              return (
+                <div key={label} className="flex flex-1 flex-col items-center gap-1.5 last:flex-none">
+                  <div className="flex w-full items-center">
+                    {/* Dot */}
+                    <div className={`relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+                      disputed ? "border-destructive bg-destructive/10" :
+                      done ? "border-primary bg-primary" :
+                      current ? "border-primary bg-background" :
+                      "border-border bg-background"
+                    }`}>
+                      {done && !disputed && (
+                        <svg className="h-3 w-3 text-primary-foreground" fill="none" viewBox="0 0 12 12">
+                          <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                      {current && !disputed && (
+                        <div className="h-2 w-2 rounded-full bg-primary" />
+                      )}
+                      {disputed && i === steps.length - 1 && (
+                        <div className="h-2 w-2 rounded-full bg-destructive" />
+                      )}
+                    </div>
+                    {/* Connector */}
+                    {!last && (
+                      <div className={`h-0.5 w-full transition-colors ${done ? "bg-primary" : "bg-border"}`} />
+                    )}
+                  </div>
+                  {/* Label */}
+                  <span className={`text-center text-[11px] leading-tight ${
+                    disputed && i === steps.length - 1 ? "text-destructive font-medium" :
+                    current ? "font-medium text-foreground" :
+                    done ? "text-muted-foreground" :
+                    "text-muted-foreground/50"
+                  }`}>
+                    {label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Deposit callout */}
+          {needsDeposit && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-sm text-amber-800">
+                Deposit <span className="font-semibold">Ξ {req.gig.ethAmount} ETH</span> to fund the escrow and start the work.{" "}
+                <Link href={`/gig/${req.gig.id}`} className="underline hover:text-amber-900">Go to gig →</Link>
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -131,33 +307,7 @@ function ClientDashboard({ requests }: { requests: Request[] }) {
         ) : (
           <div className="flex flex-col gap-3">
             {requests.map((req) => (
-              <div key={req.id} className="rounded-xl border bg-card p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <Link href={`/gig/${req.gig.id}`} className="font-medium text-foreground hover:text-primary transition-colors">
-                        {req.gig.title}
-                      </Link>
-                      {req.gig.freelancer && (
-                        <>
-                          <span className="text-xs text-muted-foreground">·</span>
-                          <span className="text-xs text-muted-foreground">by {req.gig.freelancer.name}</span>
-                        </>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground line-clamp-2">{req.proposal}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Timeline: {req.proposedTimeline} · Budget: ${req.gig.budget.toLocaleString()}</p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[req.status] ?? "bg-secondary text-foreground"}`}>
-                      {req.status}
-                    </span>
-                    <Button asChild size="sm" variant="ghost" className="rounded-full">
-                      <Link href={`/gig/${req.gig.id}`}>View</Link>
-                    </Button>
-                  </div>
-                </div>
-              </div>
+              <RequestTracker key={req.id} req={req} />
             ))}
           </div>
         )}
@@ -166,9 +316,10 @@ function ClientDashboard({ requests }: { requests: Request[] }) {
   )
 }
 
-function FreelancerDashboard({ gigs, requests, onRequestAction }: { gigs: Gig[]; requests: Request[]; onRequestAction: (id: string, action: "accept" | "reject") => void }) {
-  const pendingRequests = requests.filter((r) => r.status === "pending")
+function FreelancerDashboard({ gigs, requests, onRequestAction, actionError }: { gigs: Gig[]; requests: Request[]; onRequestAction: (id: string, action: "accept" | "reject") => void; actionError: string }) {
   const acceptedRequests = requests.filter((r) => r.status === "accepted")
+  const activeJobs = acceptedRequests.filter((r) => r.gig.status === "in_progress")
+  const completedJobs = acceptedRequests.filter((r) => ["submitted", "completed", "disputed"].includes(r.gig.status ?? ""))
 
   return (
     <div className="flex flex-col gap-12">
@@ -224,11 +375,53 @@ function FreelancerDashboard({ gigs, requests, onRequestAction }: { gigs: Gig[];
         )}
       </section>
 
-      {acceptedRequests.length > 0 && (
+      {activeJobs.length > 0 && (
         <section>
           <h2 className="mb-4 font-serif text-xl font-medium">Active Jobs</h2>
           <div className="flex flex-col gap-3">
-            {acceptedRequests.map((req) => (
+            {activeJobs.map((req) => {
+              const escrowFunded = !!req.ethAmount
+              const awaitingDeposit = !!req.gig.contractAddress && !!req.gig.ethAmount && !req.ethAmount
+              return (
+                <div key={req.id} className="rounded-xl border bg-card p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <p className="font-medium text-foreground">{req.gig.title}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {req.client?.name && <span>From {req.client.name} · </span>}
+                        ${req.gig.budget.toLocaleString()} · Due {req.gig.deadline ? format(new Date(req.gig.deadline), "MMM d, yyyy") : "—"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {escrowFunded && (
+                        <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
+                          Escrow funded
+                        </span>
+                      )}
+                      <Button asChild size="sm" className="rounded-full px-5">
+                        <Link href={`/gig/${req.gig.id}/submit`}>Submit Deliverable</Link>
+                      </Button>
+                    </div>
+                  </div>
+                  {awaitingDeposit && (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                      <p className="text-sm text-amber-800">
+                        Awaiting client deposit of <span className="font-semibold">Ξ {req.gig.ethAmount} ETH</span> to fund the escrow.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {completedJobs.length > 0 && (
+        <section>
+          <h2 className="mb-4 font-serif text-xl font-medium">Completed Jobs</h2>
+          <div className="flex flex-col gap-3">
+            {completedJobs.map((req) => (
               <div key={req.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-card p-5">
                 <div>
                   <p className="font-medium text-foreground">{req.gig.title}</p>
@@ -237,9 +430,14 @@ function FreelancerDashboard({ gigs, requests, onRequestAction }: { gigs: Gig[];
                     ${req.gig.budget.toLocaleString()} · Due {req.gig.deadline ? format(new Date(req.gig.deadline), "MMM d, yyyy") : "—"}
                   </p>
                 </div>
-                <Button asChild size="sm" className="rounded-full px-5">
-                  <Link href={`/gig/${req.gig.id}/submit`}>Submit Deliverable</Link>
-                </Button>
+                <div className="flex items-center gap-3">
+                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[req.gig.status ?? ""] ?? "bg-secondary text-foreground"}`}>
+                    {(req.gig.status ?? "").replace("_", " ")}
+                  </span>
+                  <Button asChild size="sm" variant="outline" className="rounded-full px-5">
+                    <Link href={`/gig/${req.gig.id}`}>View</Link>
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
@@ -248,6 +446,9 @@ function FreelancerDashboard({ gigs, requests, onRequestAction }: { gigs: Gig[];
 
       <section>
         <h2 className="mb-4 font-serif text-xl font-medium">Incoming Hire Requests</h2>
+        {actionError && (
+          <p className="mb-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{actionError}</p>
+        )}
         {requests.length === 0 ? (
           <div className="rounded-xl border bg-card p-10 text-center">
             <p className="text-muted-foreground">No hire requests yet.</p>
